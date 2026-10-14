@@ -24,7 +24,7 @@ def live_server():
     s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
     env = {**os.environ, "DB_PATH": str(Path(tempfile.mkdtemp()) / "e2e.db")}
     p = subprocess.Popen([sys.executable, "-m", "uvicorn", "app.main:app", "--port", str(port)], cwd=ROOT / "backend", env=env,
-                         stdout=open("/tmp/e2e.log","w"), stderr=subprocess.STDOUT)
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     url = f"http://127.0.0.1:{port}"
     import httpx
     for _ in range(60):
