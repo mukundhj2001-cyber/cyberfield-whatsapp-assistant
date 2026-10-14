@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024"
+     role="img" aria-label="Cyberfield AI">
+  <defs>
+    <linearGradient id="gTopL" x1="0%" y1="0%" x2="70%" y2="100%">
+      <stop offset="0%" stop-color="#FFE9A0"/>
+      <stop offset="55%" stop-color="#F5D76E"/>
+      <stop offset="100%" stop-color="#C9A227"/>
+    </linearGradient>
+    <linearGradient id="gTopR" x1="100%" y1="0%" x2="30%" y2="100%">
+      <stop offset="0%" stop-color="#FFE9A0"/>
+      <stop offset="55%" stop-color="#F5D76E"/>
+      <stop offset="100%" stop-color="#B8922A"/>
+    </linearGradient>
+    <linearGradient id="gWingUL" x1="0%" y1="0%" x2="100%" y2="90%">
+      <stop offset="0%" stop-color="#F5D76E"/>
+      <stop offset="100%" stop-color="#8B6914"/>
+    </linearGradient>
+    <linearGradient id="gWingUR" x1="100%" y1="0%" x2="0%" y2="90%">
+      <stop offset="0%" stop-color="#E8C85A"/>
+      <stop offset="100%" stop-color="#8B6914"/>
+    </linearGradient>
+    <linearGradient id="gWingLL" x1="10%" y1="0%" x2="90%" y2="100%">
+      <stop offset="0%" stop-color="#C9A227"/>
+      <stop offset="100%" stop-color="#6B5010"/>
+    </linearGradient>
+    <linearGradient id="gWingLR" x1="90%" y1="0%" x2="10%" y2="100%">
+      <stop offset="0%" stop-color="#C9A227"/>
+      <stop offset="100%" stop-color="#5A420C"/>
+    </linearGradient>
+    <linearGradient id="gDiaL" x1="0%" y1="0%" x2="100%" y2="70%">
+      <stop offset="0%" stop-color="#FFE9A0"/>
+      <stop offset="40%" stop-color="#F5D76E"/>
+      <stop offset="100%" stop-color="#C9A227"/>
+    </linearGradient>
+    <linearGradient id="gDiaR" x1="0%" y1="0%" x2="100%" y2="70%">
+      <stop offset="0%" stop-color="#E0C050"/>
+      <stop offset="45%" stop-color="#C9A227"/>
+      <stop offset="100%" stop-color="#8B6914"/>
+    </linearGradient>
+    <linearGradient id="gDiaLowL" x1="40%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#F5D76E"/>
+      <stop offset="100%" stop-color="#8B6914"/>
+    </linearGradient>
+    <linearGradient id="gDiaLowR" x1="60%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#C9A227"/>
+      <stop offset="100%" stop-color="#5A420C"/>
+    </linearGradient>
+    <linearGradient id="gBotL" x1="50%" y1="0%" x2="10%" y2="100%">
+      <stop offset="0%" stop-color="#C9A227"/>
+      <stop offset="100%" stop-color="#8B6914"/>
+    </linearGradient>
+    <linearGradient id="gBotR" x1="50%" y1="0%" x2="90%" y2="100%">
+      <stop offset="0%" stop-color="#B8922A"/>
+      <stop offset="100%" stop-color="#5A420C"/>
+    </linearGradient>
+    <linearGradient id="gText" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFE9A0"/>
+      <stop offset="40%" stop-color="#F5D76E"/>
+      <stop offset="100%" stop-color="#C9A227"/>
+    </linearGradient>
+  </defs>
+  <g id="mark">
+    <polygon points="512.00,210.00 330.13,315.00 444.80,316.05" fill="url(#gTopL)"/>
+    <polygon points="512.00,210.00 444.80,316.05 512.00,322.35" fill="url(#gTopL)"/>
+    <polygon points="512.00,210.00 512.00,322.35 579.20,316.05" fill="url(#gTopR)"/>
+    <polygon points="512.00,210.00 579.20,316.05 693.87,315.00" fill="url(#gTopR)"/>
+    <polygon points="330.13,315.00 388.10,414.75 444.80,316.05" fill="url(#gWingUL)"/>
+    <polygon points="330.13,315.00 330.13,420.00 388.10,414.75" fill="url(#gWingUL)"/>
+    <polygon points="330.13,420.00 330.13,525.00 417.50,465.15" fill="url(#gWingLL)"/>
+    <polygon points="330.13,420.00 417.50,465.15 388.10,414.75" fill="url(#gWingUL)"/>
+    <polygon points="693.87,315.00 579.20,316.05 635.90,414.75" fill="url(#gWingUR)"/>
+    <polygon points="693.87,315.00 635.90,414.75 693.87,420.00" fill="url(#gWingUR)"/>
+    <polygon points="693.87,420.00 606.50,465.15 693.87,525.00" fill="url(#gWingLR)"/>
+    <polygon points="693.87,420.00 635.90,414.75 606.50,465.15" fill="url(#gWingUR)"/>
+    <polygon points="512.00,322.35 417.50,465.15 512.00,465.15" fill="url(#gDiaL)"/>
+    <polygon points="512.00,322.35 512.00,465.15 606.50,465.15" fill="url(#gDiaR)"/>
+    <polygon points="512.00,465.15 417.50,465.15 512.00,630.00" fill="url(#gDiaLowL)"/>
+    <polygon points="512.00,465.15 512.00,630.00 606.50,465.15" fill="url(#gDiaLowR)"/>
+    <polygon points="330.13,525.00 512.00,630.00 417.50,465.15" fill="url(#gBotL)"/>
+    <polygon points="693.87,525.00 606.50,465.15 512.00,630.00" fill="url(#gBotR)"/>
+  </g>
+
+  <g id="wordmark">
+    <text x="262.11" y="718.00" text-anchor="start"
+          font-family="'Arial Black', 'Helvetica Neue', Helvetica, Arial, sans-serif"
+          font-size="48" font-weight="900" letter-spacing="8"
+          fill="url(#gText)">CYBERFIELD</text>
+    <polygon points="694.27,718.00 712.99,677.68 731.71,718.00 723.79,718.00 712.99,688.37 702.19,718.00" fill="url(#gText)"/>
+    <polygon points="739.71,677.68 755.24,677.68 755.24,718.00 739.71,718.00" fill="url(#gText)"/>
+  </g>
+</svg>
