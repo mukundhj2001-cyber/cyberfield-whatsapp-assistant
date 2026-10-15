@@ -64,7 +64,7 @@ To reset the demo data, delete the `data` folder or `POST /api/reset`.
 
 ## Going live (optional)
 
-Copy `.env.example` to `.env` and set your values as environment variables before you start the server (for example `set LLM_API_KEY=...` in cmd):
+Copy `.env.example` to `.env` and fill in your values. The app loads `.env` automatically on start:
 
 | Variable | Purpose |
 |---|---|

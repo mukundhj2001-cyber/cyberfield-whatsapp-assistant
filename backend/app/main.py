@@ -1,6 +1,15 @@
 """Cyberfield WhatsApp Assistant — FastAPI app (API + webhook + built frontend)."""
 import json, os
 from pathlib import Path
+
+# Load KEY=VALUE pairs from the project-root .env file (does not override real env vars)
+_env = Path(__file__).resolve().parents[2] / ".env"
+if _env.exists():
+    for _line in _env.read_text(encoding="utf-8-sig").splitlines():
+        _line = _line.strip()
+        if _line and not _line.startswith("#") and "=" in _line:
+            _k, _v = _line.split("=", 1)
+            os.environ.setdefault(_k.strip(), _v.strip().strip('"').strip("'"))
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
