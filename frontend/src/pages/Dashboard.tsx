@@ -65,7 +65,7 @@ export default function Dashboard({ biz }: { biz?: { name: string; kind: string 
                 <div className={`max-w-[85%] rounded-lg px-2.5 py-1.5 text-xs whitespace-pre-wrap ${m.direction === "in" ? "bg-ink-600" : m.sender === "owner" ? "bg-gold-500/20 border border-gold-500/40" : "bg-[#005c4b]/70"}`}>
                   {m.text}<div className="text-[10px] text-zinc-400 mt-0.5">{m.sender} · {m.intent}</div></div></div>))}
             </div>
-            <div className="flex gap-2 mt-3"><input className="input" value={reply} onChange={(e) => setReply(e.target.value)} placeholder="Reply as the business owner…" />
+            <div className="flex gap-2 mt-3"><input className="input" value={reply} onChange={(e) => setReply(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") sendReply(); }} placeholder="Reply as the business owner…" />
               <button className="btn-gold" onClick={sendReply}>Send</button></div>
           </div>)}
       </div>
