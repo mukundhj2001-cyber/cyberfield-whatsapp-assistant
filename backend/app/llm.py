@@ -41,7 +41,7 @@ def chat(system: str, user: str, timeout: float = 20) -> str | None:
     if not enabled():
         return None
     return _complete([{"role": "system", "content": system}, {"role": "user", "content": user}],
-                     os.environ.get("LLM_MODEL", "gpt-4o-mini"), timeout)
+                     (os.environ.get("LLM_MODEL") or "gpt-4o-mini"), timeout)
 
 
 LANG_NAME = {"en": "English", "hi": "Hindi", "ta": "Tamil"}
@@ -67,7 +67,7 @@ def vision(prompt: str, image: bytes, mime: str, timeout: float = 45) -> str | N
         return None
     url = f"data:{mime or 'image/jpeg'};base64,{base64.b64encode(image).decode()}"
     return _complete([{"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": url}}]}],
-                     os.environ.get("LLM_VISION_MODEL") or os.environ.get("LLM_MODEL", "gpt-4o-mini"), timeout, 0)
+                     os.environ.get("LLM_VISION_MODEL") or (os.environ.get("LLM_MODEL") or "gpt-4o-mini"), timeout, 0)
 
 
 def parse_json(text: str | None) -> dict | None:
@@ -88,7 +88,7 @@ def transcribe(audio: bytes, mime: str = "audio/ogg", timeout: float = 60) -> di
     ext = {"audio/ogg": "ogg", "audio/mpeg": "mp3", "audio/mp4": "m4a", "audio/amr": "amr", "audio/aac": "aac"}.get((mime or "").split(";")[0], "ogg")
     try:
         r = httpx.post(f"{_base('STT')}/audio/transcriptions", timeout=timeout, headers={"Authorization": f"Bearer {key}"},
-                       data={"model": os.environ.get("STT_MODEL", "whisper-1"), "response_format": "verbose_json"},
+                       data={"model": (os.environ.get("STT_MODEL") or "whisper-1"), "response_format": "verbose_json"},
                        files={"file": (f"voice.{ext}", audio, mime or "audio/ogg")})
         r.raise_for_status()
         d = r.json()

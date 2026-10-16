@@ -8,12 +8,12 @@ import httpx
 from . import db
 from .logs import log_event, mask_phone
 
-GRAPH_VERSION = os.environ.get("WHATSAPP_GRAPH_VERSION", "v20.0")
+GRAPH_VERSION = (os.environ.get("WHATSAPP_GRAPH_VERSION") or "v20.0")
 _sig_warned = False
 
 
 def graph_url(path: str) -> str:
-    return f"https://graph.facebook.com/{os.environ.get('WHATSAPP_GRAPH_VERSION', GRAPH_VERSION)}/{path.lstrip('/')}"
+    return f"https://graph.facebook.com/{os.environ.get('WHATSAPP_GRAPH_VERSION') or GRAPH_VERSION}/{path.lstrip('/')}"
 
 
 def live() -> bool:
@@ -39,8 +39,8 @@ def verify_signature(raw: bytes, header: str | None) -> bool:
 # ---------- sending ----------
 def _post_with_retry(url: str, token: str, body: dict):
     """Returns (ok, response_json_or_None, error_text, attempts)."""
-    tries = max(1, int(os.environ.get("WHATSAPP_SEND_RETRIES", "3")))
-    base = float(os.environ.get("WHATSAPP_RETRY_BASE_DELAY", "0.5"))
+    tries = max(1, int((os.environ.get("WHATSAPP_SEND_RETRIES") or "3")))
+    base = float((os.environ.get("WHATSAPP_RETRY_BASE_DELAY") or "0.5"))
     err = ""
     for i in range(1, tries + 1):
         try:
@@ -59,7 +59,7 @@ def _post_with_retry(url: str, token: str, body: dict):
     return False, None, err, tries
 
 
-def send(phone: str, message: dict, log_text: str, creds: tuple[str, str] | None = None) -> str:
+def send(phone: str, message: dict, log_text: str, creds: tuple[str, str] | None = None, bid: int | None = None) -> str:
     """Send one message object (the part after messaging_product/to). Returns 'live' | 'simulated' | 'failed'."""
     if creds is None and live():
         creds = (os.environ["WHATSAPP_PHONE_NUMBER_ID"], os.environ["WHATSAPP_TOKEN"])
@@ -74,13 +74,21 @@ def send(phone: str, message: dict, log_text: str, creds: tuple[str, str] | None
             mode = "failed"
         log_event("whatsapp_send", "info" if ok else "error", to=mask_phone(phone), type=message.get("type"),
                   mode=mode, attempts=attempts, wa_message_id=wamid, error=err or None)
-    db.x("INSERT INTO outbox(phone,text,mode,wa_message_id,status,error,attempts) VALUES(?,?,?,?,?,?,?)",
-         (phone, log_text, mode, wamid, "sent" if mode == "live" else mode, err or None, attempts))
+    db.x("INSERT INTO outbox(business_id,phone,text,mode,wa_message_id,status,error,attempts) VALUES(?,?,?,?,?,?,?,?)",
+         (bid or 1, phone, log_text, mode, wamid, "sent" if mode == "live" else mode, err or None, attempts))
     return mode
 
 
-def send_text(phone: str, text: str, creds=None) -> str:
-    return send(phone, {"type": "text", "text": {"body": text[:4096], "preview_url": False}}, text, creds)
+def send_text(phone: str, text: str, creds=None, bid=None) -> str:
+    return send(phone, {"type": "text", "text": {"body": text[:4096], "preview_url": False}}, text, creds, bid)
+
+
+def send_template(phone: str, name: str, lang: str, params: list[str] | None = None, creds=None, bid=None, preview: str = "") -> str:
+    """Approved template message: the only kind Meta allows outside the 24-hour customer service window."""
+    tpl = {"name": name, "language": {"code": lang or "en"}}
+    if params:
+        tpl["components"] = [{"type": "body", "parameters": [{"type": "text", "text": str(p)[:1024]} for p in params]}]
+    return send(phone, {"type": "template", "template": tpl}, f"[template {name}] {preview}".strip(), creds, bid)
 
 
 def interactive_message(text: str, ui: dict) -> dict:
@@ -95,14 +103,14 @@ def interactive_message(text: str, ui: dict) -> dict:
     return {"type": "interactive", "interactive": {"type": "list", "body": body, "action": {"button": ui["button"][:20], "sections": sections}}}
 
 
-def send_reply(phone: str, text: str, ui: dict | None = None, creds=None) -> str:
+def send_reply(phone: str, text: str, ui: dict | None = None, creds=None, bid=None) -> str:
     """Send the bot's reply, as buttons/list when the engine attached one. Long bodies go as text first."""
     if not ui:
-        return send_text(phone, text, creds)
+        return send_text(phone, text, creds, bid)
     if len(text) > 1024:
-        send_text(phone, text, creds)
+        send_text(phone, text, creds, bid)
         text = "👇"
-    return send(phone, interactive_message(text, ui), text, creds)
+    return send(phone, interactive_message(text, ui), text, creds, bid)
 
 
 def download_media(media_id: str, creds=None, max_bytes: int = 16 * 1024 * 1024) -> tuple[bytes, str] | None:

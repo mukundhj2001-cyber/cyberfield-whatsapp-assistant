@@ -29,9 +29,9 @@ def setup():
     if getattr(_LOGGER, "_cf_ready", False):
         return
     h = logging.StreamHandler(sys.stdout)
-    h.setFormatter(TextFormatter() if os.environ.get("LOG_FORMAT", "json").lower() == "text" else JsonFormatter())
+    h.setFormatter(TextFormatter() if (os.environ.get("LOG_FORMAT") or "json").lower() == "text" else JsonFormatter())
     _LOGGER.handlers[:] = [h]
-    _LOGGER.setLevel(os.environ.get("LOG_LEVEL", "INFO").upper())
+    _LOGGER.setLevel((os.environ.get("LOG_LEVEL") or "INFO").upper())
     _LOGGER.propagate = False
     _LOGGER._cf_ready = True
 

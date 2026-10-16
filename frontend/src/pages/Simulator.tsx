@@ -8,6 +8,12 @@ const PERSONAS = [
   { phone: "+919876500002", name: "Vikram", lang: "हिन्दी" },
   { phone: "+919876500003", name: "Lakshmi", lang: "தமிழ்" },
 ];
+const QUICK_BY_KIND: Record<string, Record<string, string[]>> = {
+  clinic: { English: ["Hi", "Services", "I need a blood test", "Book an appointment", "Do you accept insurance?", "When are reports ready?", "Talk to a human"],
+    "हिन्दी": ["नमस्ते", "मेनू", "अपॉइंटमेंट बुक करना है", "आप कितने बजे खुलते हैं?"], "தமிழ்": ["வணக்கம்", "மெனு", "முன்பதிவு", "நேரம் என்ன?"] },
+  salon: { English: ["Hi", "Menu", "Book a haircut", "Facial", "Do you take walk-ins?", "Bridal makeup for my wedding", "Talk to a human"],
+    "हिन्दी": ["नमस्ते", "मेनू", "बुक करना है"], "தமிழ்": ["வணக்கம்", "மெனு", "முன்பதிவு", "நேரம் என்ன?"] },
+};
 const QUICK: Record<string, string[]> = {
   English: ["Hi", "Menu", "2 masala dosa and 2 filter coffee", "confirm", "PICKUP", "Book a table", "Do you deliver?", "Catering for 50 people", "Talk to a human"],
   "हिन्दी": ["नमस्ते", "मेनू", "1 बिरयानी और 2 लस्सी", "confirm", "टेबल बुक करना है", "आप कितने बजे खुलते हैं?", "मैनेजर से बात करनी है"],
@@ -44,7 +50,8 @@ function Bubble({ m }: { m: Msg }) {
   );
 }
 
-export default function Simulator() {
+export default function Simulator({ biz }: { biz?: { name: string; kind: string } }) {
+  const quick = (QUICK_BY_KIND[biz?.kind ?? ""] ?? QUICK);
   const [persona, setPersona] = useState(PERSONAS[0]);
   const [msgs, setMsgs] = useState<Record<string, Msg[]>>({});
   const [text, setText] = useState("");
@@ -90,7 +97,7 @@ export default function Simulator() {
         <div className="h-6 bg-[#111b21] flex justify-center"><div className="h-4 w-24 rounded-b-xl bg-black" /></div>
         <div className="bg-[#202c33] px-3 py-2.5 flex items-center gap-2.5">
           <img src="/logo.svg" className="h-8 w-8 rounded-full bg-black p-1" />
-          <div><div className="text-sm font-semibold text-white">Spice Route Kitchen</div><div className="text-[11px] text-emerald-400">{busy ? "typing…" : "online · Business account"}</div></div>
+          <div><div className="text-sm font-semibold text-white">{biz?.name ?? "…"}</div><div className="text-[11px] text-emerald-400">{busy ? "typing…" : "online · Business account"}</div></div>
         </div>
         <div data-testid="chat" className="h-[470px] overflow-y-auto p-3 space-y-1.5 bg-[#0b141a] bg-[radial-gradient(rgba(255,255,255,.03)_1px,transparent_1px)] [background-size:14px_14px]">
           <div className="text-center"><span className="chip bg-[#182229] text-[#8696a0]">Messages are simulated · demo mode</span></div>
@@ -111,7 +118,7 @@ export default function Simulator() {
         <div className="card p-4">
           <div className="text-xs uppercase tracking-wider text-gold-400/80 font-semibold mb-3">Try these</div>
           <div className="flex flex-wrap gap-2">
-            {QUICK[persona.lang].map((q) => (
+            {(quick[persona.lang] ?? []).map((q) => (
               <button key={q} onClick={() => send(q)} className="rounded-full border border-gold-500/30 px-3 py-1 text-xs text-gold-200 hover:bg-gold-500/10">{q}</button>
             ))}
           </div>

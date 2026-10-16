@@ -1,6 +1,6 @@
 """Conversation engine: language detection, intent routing, cart/booking/lead flows, handoff."""
 import datetime as dt, json, random, re, string
-from . import db, llm
+from . import db, llm, payments, tenants
 
 LANGS = ("en", "hi", "ta")
 HI_ROMAN = {"namaste", "kya", "hai", "mujhe", "chahiye", "kitna", "kitne", "aap", "kab", "bhai", "haan", "nahi", "karna", "dijiye"}
@@ -21,9 +21,6 @@ def detect_lang(text: str) -> str:
 
 
 T = {
-    "greet": {"en": "Hi {name}! 👋 Welcome to *Spice Route Kitchen*. I can help you:\n• 🍛 Order food — reply *MENU*\n• 📅 Book a table — reply *BOOK*\n• ❓ Ask about hours, delivery, payments\n• 🙋 Talk to our team — reply *HUMAN*",
-              "hi": "नमस्ते {name}! 👋 *Spice Route Kitchen* में आपका स्वागत है। मैं मदद कर सकता हूँ:\n• 🍛 खाना ऑर्डर — *MENU* लिखें\n• 📅 टेबल बुक — *BOOK* लिखें\n• ❓ समय, डिलीवरी, भुगतान के सवाल\n• 🙋 हमारी टीम से बात — *HUMAN* लिखें",
-              "ta": "வணக்கம் {name}! 👋 *Spice Route Kitchen*-க்கு வரவேற்கிறோம். நான் உதவ முடியும்:\n• 🍛 உணவு ஆர்டர் — *MENU* அனுப்புங்கள்\n• 📅 டேபிள் முன்பதிவு — *BOOK*\n• ❓ நேரம், டெலிவரி, கட்டணம் பற்றிய கேள்விகள்\n• 🙋 எங்கள் குழுவுடன் பேச — *HUMAN*"},
     "menu": {"en": "📋 *Our menu*\n{items}\n\nReply like “2 paneer tikka and 1 lassi” to add to your cart.",
              "hi": "📋 *हमारा मेनू*\n{items}\n\nकार्ट में जोड़ने के लिए लिखें, जैसे “2 paneer tikka और 1 lassi”।",
              "ta": "📋 *எங்கள் மெனு*\n{items}\n\nகார்ட்டில் சேர்க்க “2 paneer tikka, 1 lassi” என்று அனுப்புங்கள்."},
@@ -53,7 +50,7 @@ T = {
                "ta": "✅ *{when}* அன்று *{n}* பேருக்கு டேபிள் புக் ஆனது. குறியீடு: *{code}*. சந்திப்போம்!"},
     "bad_choice": {"en": "Please reply with one of the numbers shown.", "hi": "कृपया दिखाए गए नंबरों में से एक भेजें।",
                    "ta": "காட்டப்பட்ட எண்களில் ஒன்றை அனுப்புங்கள்."},
-    "ask_lead": {"en": "We'd love to help with that! 🙌 Please share your *name* and *email or phone* so our events team can send a quote.",
+    "ask_lead": {"en": "We'd love to help with that! 🙌 Please share your *name* and *email or phone* so our team can send a quote.",
                  "hi": "हमें खुशी होगी! 🙌 कृपया अपना *नाम* और *ईमेल या फ़ोन* भेजें ताकि हमारी टीम कोटेशन भेज सके।",
                  "ta": "மகிழ்ச்சியுடன் உதவுகிறோம்! 🙌 உங்கள் *பெயர்* மற்றும் *மின்னஞ்சல் அல்லது தொலைபேசி* அனுப்புங்கள்."},
     "lead_done": {"en": "Thanks {name}! 📝 Our team will contact you at {contact} within 2 working hours.",
@@ -125,6 +122,33 @@ EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+")
 PHONE = re.compile(r"(?:\+?\d[\d \-]{8,}\d)")
 
 
+
+# ---- wording that depends on the kind of business ----
+T.update({
+    "greet": {"en": "Hi {name}! 👋 Welcome to *{biz}*. I can help you:\n• {l1}\n• {l2}\n• ❓ Ask about hours, location, payments\n• 🙋 Talk to our team — reply *HUMAN*",
+              "hi": "नमस्ते {name}! 👋 *{biz}* में आपका स्वागत है। मैं मदद कर सकता हूँ:\n• {l1}\n• {l2}\n• ❓ समय, पता, भुगतान के सवाल\n• 🙋 हमारी टीम से बात — *HUMAN* लिखें",
+              "ta": "வணக்கம் {name}! 👋 *{biz}*-க்கு வரவேற்கிறோம். நான் உதவ முடியும்:\n• {l1}\n• {l2}\n• ❓ நேரம், முகவரி, கட்டணம் பற்றிய கேள்விகள்\n• 🙋 எங்கள் குழுவுடன் பேச — *HUMAN*"},
+    "slots": {"en": "📅 *Available times*\n{slots}\n\nReply with the slot number (e.g. *2*).",
+              "hi": "📅 *उपलब्ध समय*\n{slots}\n\nस्लॉट नंबर भेजें (जैसे *2*)।",
+              "ta": "📅 *கிடைக்கும் நேரங்கள்*\n{slots}\n\nஸ்லாட் எண்ணை அனுப்புங்கள் (உதா. *2*)."},
+    "services": {"en": "📋 *Our services*\n{items}\n\nReply *BOOK* or tap a service to book an appointment.",
+                 "hi": "📋 *हमारी सेवाएँ*\n{items}\n\nअपॉइंटमेंट के लिए *BOOK* लिखें या कोई सेवा चुनें।",
+                 "ta": "📋 *எங்கள் சேவைகள்*\n{items}\n\nமுன்பதிவு செய்ய *BOOK* அனுப்புங்கள் அல்லது ஒரு சேவையைத் தேர்ந்தெடுங்கள்."},
+    "booked_appt": {"en": "✅ Appointment booked{svc} on *{when}*. Booking code: *{code}*. See you soon!",
+                    "hi": "✅ *{when}* को अपॉइंटमेंट बुक हो गया{svc}। कोड: *{code}*। जल्द मिलते हैं!",
+                    "ta": "✅ *{when}* அன்று முன்பதிவு உறுதியானது{svc}. குறியீடு: *{code}*. சந்திப்போம்!"},
+    "hours": {"en": "🕒 Our hours: {hours}", "hi": "🕒 हमारा समय: {hours}", "ta": "🕒 எங்கள் நேரம்: {hours}"},
+    "pay": {"en": "💳 Pay now: {link}", "hi": "💳 अभी भुगतान करें: {link}", "ta": "💳 இப்போது செலுத்துங்கள்: {link}"},
+})
+LINES = {
+    "restaurant": ({"en": "🍛 Order food — reply *MENU*", "hi": "🍛 खाना ऑर्डर — *MENU* लिखें", "ta": "🍛 உணவு ஆர்டர் — *MENU* அனுப்புங்கள்"},
+                   {"en": "📅 Book a table — reply *BOOK*", "hi": "📅 टेबल बुक — *BOOK* लिखें", "ta": "📅 டேபிள் முன்பதிவு — *BOOK*"}),
+    "other": ({"en": "📋 Services & prices — reply *MENU*", "hi": "📋 सेवाएँ और दाम — *MENU* लिखें", "ta": "📋 சேவைகள் & கட்டணம் — *MENU*"},
+              {"en": "📅 Book an appointment — reply *BOOK*", "hi": "📅 अपॉइंटमेंट बुक — *BOOK* लिखें", "ta": "📅 முன்பதிவு — *BOOK*"}),
+}
+HOURS_KW = ["hours", "timing", "timings", "open", "close", "closing", "समय", "खुला", "खुलते", "बजे", "टाइम", "நேரம்", "திறந்து"]
+
+
 def has(text: str, words) -> bool:
     t = text.lower()
     for w in words:
@@ -136,17 +160,18 @@ def has(text: str, words) -> bool:
     return False
 
 
-def menu_items():
-    return [dict(m, aliases=json.loads(m["aliases"])) for m in db.q("SELECT * FROM menu ORDER BY id")]
+def menu_items(bid=None):
+    bid = bid or tenants.default()["id"]
+    return [dict(m, aliases=json.loads(m["aliases"] or "[]")) for m in db.q("SELECT * FROM menu WHERE business_id=? ORDER BY id", (bid,))]
 
 
-def parse_items(text: str):
+def parse_items(text: str, bid=None):
     """Find menu items + quantities in free text (any language)."""
     t = text.lower()
     found = []
-    for m in menu_items():
+    for m in menu_items(bid):
         for a in [m["name"].lower()] + m["aliases"]:
-            i = t.find(a.lower())
+            i = t.find(a.lower()) if a else -1
             if i >= 0:
                 before = t[max(0, i - 14):i].split()
                 qty = 1
@@ -159,19 +184,19 @@ def parse_items(text: str):
     return found
 
 
-def faq_match(text: str):
+def faq_match(text: str, bid=None):
     t = text.lower()
     best, score = None, 0
-    for f in db.q("SELECT * FROM faq"):
-        s = sum(1 for k in f["keywords"].lower().split() if len(k) > 2 and k in t)
+    for f in db.q("SELECT * FROM faq WHERE business_id=?", (bid or tenants.default()["id"],)):
+        s = sum(1 for k in (f["keywords"] or "").lower().split() if len(k) > 2 and k in t)
         if s > score:
             best, score = f, s
     return best if score >= 1 else None
 
 
-def available_slots(limit=6):
-    return db.q("SELECT * FROM slots WHERE booked < capacity AND starts_at > ? ORDER BY starts_at LIMIT ?",
-                (dt.datetime.now().isoformat(timespec="minutes"), limit))
+def available_slots(bid=None, limit=6):
+    return db.q("SELECT * FROM slots WHERE business_id=? AND booked < capacity AND starts_at > ? ORDER BY starts_at LIMIT ?",
+                (bid or tenants.default()["id"], dt.datetime.now().isoformat(timespec="minutes"), limit))
 
 
 def fmt_slot(s):
@@ -185,11 +210,12 @@ def cart_view(cart, lang):
     return T["cart"][lang].format(lines=lines, total=sum(c["qty"] * c["price"] for c in cart))
 
 
-def get_conv(phone, name):
-    c = db.q("SELECT * FROM conversations WHERE phone=?", (phone,), one=True)
+def get_conv(phone, name, bid=None):
+    bid = bid or tenants.default()["id"]
+    c = db.q("SELECT * FROM conversations WHERE business_id=? AND phone=?", (bid, phone), one=True)
     if not c:
-        db.x("INSERT INTO conversations(phone,name) VALUES(?,?)", (phone, name or phone))
-        c = db.q("SELECT * FROM conversations WHERE phone=?", (phone,), one=True)
+        db.x("INSERT INTO conversations(business_id,phone,name) VALUES(?,?,?)", (bid, phone, name or phone))
+        c = db.q("SELECT * FROM conversations WHERE business_id=? AND phone=?", (bid, phone), one=True)
     return c
 
 
@@ -199,14 +225,21 @@ def log(conv_id, direction, sender, text, intent=None, lang=None):
     db.x("UPDATE conversations SET updated_at=CURRENT_TIMESTAMP WHERE id=?", (conv_id,))
 
 
+def pick_lang(lang, biz):
+    """Reply in the customer's language if the business offers it, else in the business default."""
+    langs = biz.get("languages") or ["en"]
+    return lang if lang in langs else (biz.get("default_lang") if biz.get("default_lang") in LANGS else "en")
+
+
 def handle_message(phone: str, name: str | None, text: str, action: str | None = None, lang_hint: str | None = None,
-                   log_text: str | None = None) -> dict:
-    """Process one inbound message.
+                   log_text: str | None = None, biz: dict | None = None) -> dict:
+    """Process one inbound message for a business (default business if biz is None).
 
     action: id of a tapped reply button / list row (e.g. 'slot:12'); lang_hint: language reported by speech-to-text.
-    Returns {'reply': str|None, 'intent': str, 'lang': str, 'interactive': dict|None}.
+    Returns {'reply': str|None, 'intent': str, 'lang': str, 'interactive': dict|None, 'business_id': int}.
     """
-    conv = get_conv(phone, name)
+    biz = biz or tenants.default()
+    conv = get_conv(phone, name, biz["id"])
     text = text or ""
     lang = detect_lang(text)
     if lang_hint in LANGS and lang == "en":
@@ -214,6 +247,7 @@ def handle_message(phone: str, name: str | None, text: str, action: str | None =
     # keep previous language for taps and short/neutral messages like "2" or "confirm"
     elif action or (lang == "en" and not re.search(r"[a-zA-Z]{4,}", text)):
         lang = conv["lang"] or "en"
+    lang = pick_lang(lang, biz)
     state = db.jload(conv["state"], {}) or {}
     first = name or conv["name"] or ""
     db.x("UPDATE conversations SET lang=?, name=COALESCE(?, name) WHERE id=?", (lang, name, conv["id"]))
@@ -221,36 +255,38 @@ def handle_message(phone: str, name: str | None, text: str, action: str | None =
     shown = log_text or text
     if conv["needs_human"]:
         log(conv["id"], "in", "customer", shown, "handoff_pending", lang)
-        return {"reply": None, "intent": "handoff_pending", "lang": lang, "interactive": None}
+        return {"reply": None, "intent": "handoff_pending", "lang": lang, "interactive": None, "business_id": biz["id"]}
 
-    out = route(conv, state, text, lang, first, action)
+    out = route(biz, conv, state, text, lang, first, action)
     intent, reply, ui = (out + (None,))[:3]
     db.x("UPDATE conversations SET state=? WHERE id=?", (json.dumps(state, ensure_ascii=False), conv["id"]))
     log(conv["id"], "in", "customer", shown, intent, lang)
     log(conv["id"], "out", "bot", reply, intent, lang)
-    return {"reply": reply, "intent": intent, "lang": lang, "interactive": ui}
+    return {"reply": reply, "intent": intent, "lang": lang, "interactive": ui, "business_id": biz["id"]}
 
 
 def handoff(conv_id, reason):
     db.x("UPDATE conversations SET needs_human=1, handoff_reason=? WHERE id=?", (reason[:200], conv_id))
 
 
-def handle_image(phone: str, name: str | None, caption: str, found: dict | None) -> dict:
+def handle_image(phone: str, name: str | None, caption: str, found: dict | None, biz: dict | None = None) -> dict:
     """A customer photo. found = vision result {'kind': 'prescription'|'product'|..., 'items': [{'name','qty'}], 'summary'}.
 
-    Matched menu items go into the cart; prescriptions, unreadable photos and anything we can't match go to a human."""
-    conv = get_conv(phone, name)
-    lang = detect_lang(caption) if caption.strip() else (conv["lang"] or "en")
+    Matched menu items go into the cart; prescriptions, unreadable photos, anything we can't match, and photos sent to
+    businesses that don't take orders go to a human."""
+    biz = biz or tenants.default()
+    conv = get_conv(phone, name, biz["id"])
+    lang = pick_lang(detect_lang(caption) if caption.strip() else (conv["lang"] or "en"), biz)
     state = db.jload(conv["state"], {}) or {}
     found = found or {}
     summary = (found.get("summary") or caption or "photo").strip()
     log_text = f"📷 Photo{': ' + caption if caption else ''}"
     if conv["needs_human"]:
         log(conv["id"], "in", "customer", log_text, "handoff_pending", lang)
-        return {"reply": None, "intent": "handoff_pending", "lang": lang, "interactive": None}
+        return {"reply": None, "intent": "handoff_pending", "lang": lang, "interactive": None, "business_id": biz["id"]}
     wanted = " and ".join(f"{int(i.get('qty') or 1)} {i.get('name', '')}" for i in found.get("items", []) if i.get("name"))
-    matched = parse_items(wanted) if wanted else []
-    if found.get("kind") == "prescription" or not matched:
+    matched = parse_items(wanted, biz["id"]) if wanted else []
+    if found.get("kind") == "prescription" or not matched or not biz.get("orders_enabled"):
         handoff(conv["id"], f"Photo ({found.get('kind') or 'unrecognised'}): {summary}")
         reply, intent, ui = T["image_handoff"][lang], "handoff", None
     else:
@@ -260,7 +296,7 @@ def handle_image(phone: str, name: str | None, caption: str, found: dict | None)
     db.x("UPDATE conversations SET state=? WHERE id=?", (json.dumps(state, ensure_ascii=False), conv["id"]))
     log(conv["id"], "in", "customer", log_text, intent, lang)
     log(conv["id"], "out", "bot", reply, intent, lang)
-    return {"reply": reply, "intent": intent, "lang": lang, "interactive": ui}
+    return {"reply": reply, "intent": intent, "lang": lang, "interactive": ui, "business_id": biz["id"]}
 
 
 def add_to_cart(state, items):
@@ -275,35 +311,86 @@ def add_to_cart(state, items):
     return cart
 
 
-def business_facts() -> str:
-    """Everything the LLM is allowed to know: FAQ answers, menu with prices, open slots."""
-    faq = "\n".join(f"- {x['topic']}: {x['answer_en']}" for x in db.q("SELECT * FROM faq"))
-    menu = "\n".join(f"- {m['name']} ({m['category']}): ₹{m['price']}" for m in menu_items())
-    return f"About us / FAQ:\n{faq}\n\nMenu (only these items exist):\n{menu}"
+def business_facts(biz=None) -> str:
+    """Everything the LLM is allowed to know: profile, hours, FAQ answers, menu/services with prices."""
+    biz = biz or tenants.default()
+    faq = "\n".join(f"- {x['topic']}: {x['answer_en']}" for x in db.q("SELECT * FROM faq WHERE business_id=?", (biz["id"],)))
+    menu = "\n".join(f"- {m['name']} ({m['category']}): ₹{m['price']}" for m in menu_items(biz["id"]))
+    hours = (biz.get("hours") or {}).get("en") or "not listed"
+    label = "Menu" if biz.get("kind") == "restaurant" else "Services"
+    return (f"Business: {biz['name']} ({biz.get('tagline') or biz.get('kind')})\nOpening hours: {hours}\n"
+            f"Takes orders on WhatsApp: {'yes' if biz.get('orders_enabled') else 'no, bookings only'}\n\n"
+            f"FAQ:\n{faq}\n\n{label} (only these exist):\n{menu}")
 
 
 ACTION_TEXT = {"menu": "menu", "book": "book", "human": "human", "confirm": "confirm", "cancel": "cancel", "pickup": "pickup", "more": "menu"}
 
 
-def route(conv, state, text, lang, first, action=None):
+def start_booking(biz, state, lang, service=None):
+    slots = available_slots(biz["id"])
+    if not slots:
+        return "booking", T["no_slots"][lang]
+    state.clear()
+    state.update(flow="booking_slot", slot_options=[s["id"] for s in slots], **({"service": service} if service else {}))
+    rows = [{"id": f"slot:{s['id']}", "title": fmt_slot(s)[:24], "description": f"{s['capacity'] - s['booked']} left"} for s in slots]
+    return ("booking", T["slots"][lang].format(slots="\n".join(f"*{i+1}.* {fmt_slot(s)}" for i, s in enumerate(slots))),
+            list_ui(B["view_slots"][lang], "Available", rows))
+
+
+def finish_booking(biz, conv, state, lang, n):
+    slot = db.q("SELECT * FROM slots WHERE id=? AND business_id=?", (state["slot_id"], biz["id"]), one=True)
+    if not slot or db.xc("UPDATE slots SET booked=booked+1 WHERE id=? AND booked < capacity", (slot["id"],)) != 1:
+        state.clear()
+        return "booking", T["no_slots"][lang]
+    code = (biz.get("code_prefix") or "BK") + "-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=5))
+    service = state.get("service")
+    db.x("INSERT INTO bookings(business_id,conversation_id,slot_id,party_size,code,service) VALUES(?,?,?,?,?,?)",
+         (biz["id"], conv["id"], slot["id"], n, code, service))
+    state.clear()
+    if biz.get("kind") == "restaurant":
+        return "booking", T["booked"][lang].format(n=n, when=fmt_slot(slot), code=code)
+    return "booking", T["booked_appt"][lang].format(when=fmt_slot(slot), code=code, svc=f" ({service})" if service else "")
+
+
+def place_order(biz, conv, state, lang, t, pickup):
+    cart = state.get("cart", [])
+    total = sum(c["qty"] * c["price"] for c in cart)
+    oid = db.x("INSERT INTO orders(business_id,conversation_id,items,total,fulfilment) VALUES(?,?,?,?,?)",
+               (biz["id"], conv["id"], json.dumps(cart), total, "Pickup" if pickup else f"Delivery: {t[:200]}"))
+    state.clear()
+    reply = T["order_done"][lang].format(id=oid, total=total, fulfil=FULFIL["pickup" if pickup else "delivery"][lang])
+    link = payments.create_for_order(oid, biz, conv)
+    if link:
+        reply += "\n\n" + T["pay"][lang].format(link=link)
+    return "order", reply
+
+
+def route(biz, conv, state, text, lang, first, action=None):
     flow = state.get("flow")
     t = text.strip()
+    bid = biz["id"]
+    restaurant = biz.get("kind") == "restaurant"
     if action:
         if action.startswith("cat:"):
             cat = action[4:]
-            items = [m for m in menu_items() if m["category"] == cat]
+            items = [m for m in menu_items(bid) if m["category"] == cat]
             if items:
                 body = T["cat_items"][lang].format(cat=cat, example=items[0]["name"].lower(),
                                                    items="\n".join(f"• {m['name']} — ₹{m['price']}" for m in items))
                 rows = [{"id": f"item:{m['id']}", "title": m["name"][:24], "description": f"₹{m['price']}"} for m in items]
                 return "menu", body, list_ui(B["view_items"][lang], cat, rows)
         if action.startswith("item:"):
-            m = next((m for m in menu_items() if str(m["id"]) == action[5:]), None)
+            m = next((m for m in menu_items(bid) if str(m["id"]) == action[5:]), None)
+            if m and not biz.get("orders_enabled"):
+                return start_booking(biz, state, lang, service=m["name"])
             if m:
-                state.pop("flow", None) if flow != "checkout" else None
+                if flow != "checkout":
+                    state.pop("flow", None)
                 return "order", cart_view(add_to_cart(state, [(m, 1)]), lang), buttons(lang, "confirm", "more", "cancel")
         if action.startswith("slot:") and flow == "booking_slot" and action[5:].isdigit() and int(action[5:]) in state.get("slot_options", []):
             state["slot_id"] = int(action[5:])
+            if not restaurant:
+                return finish_booking(biz, conv, state, lang, 1)
             state["flow"] = "booking_party"
             return "booking", T["ask_party"][lang]
         t = ACTION_TEXT.get(action, t)
@@ -322,37 +409,27 @@ def route(conv, state, text, lang, first, action=None):
         m = re.search(r"\d+", t)
         if m and 1 <= int(m.group()) <= len(opts):
             state["slot_id"] = opts[int(m.group()) - 1]
+            if not restaurant:
+                return finish_booking(biz, conv, state, lang, 1)
             state["flow"] = "booking_party"
             return "booking", T["ask_party"][lang]
-        if not has(t, KW["menu"] + KW["book"]):
+        if not has(t, KW["menu"] + KW["book"]) and not action:
             return "booking", T["bad_choice"][lang]
     if flow == "booking_party":
         m = re.search(r"\d+", t)
         n = int(m.group()) if m else NUM_WORDS.get(t.lower())
         if n and 1 <= n <= 12:
-            slot = db.q("SELECT * FROM slots WHERE id=?", (state["slot_id"],), one=True)
-            code = "SR-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=5))
-            db.x("UPDATE slots SET booked=booked+1 WHERE id=?", (slot["id"],))
-            db.x("INSERT INTO bookings(conversation_id,slot_id,party_size,code) VALUES(?,?,?,?)", (conv["id"], slot["id"], n, code))
-            state.clear()
-            return "booking", T["booked"][lang].format(n=n, when=fmt_slot(slot), code=code)
+            return finish_booking(biz, conv, state, lang, n)
         return "booking", T["ask_party"][lang]
-    if flow == "checkout" and not (action and action not in ("pickup",)):
-        cart = state.get("cart", [])
-        pickup = has(t, ["pickup", "pick up", "takeaway", "पिकअप", "நேரில்"])
-        fulfil = "pickup" if pickup else "delivery"
-        total = sum(c["qty"] * c["price"] for c in cart)
-        oid = db.x("INSERT INTO orders(conversation_id,items,total,fulfilment) VALUES(?,?,?,?)",
-                   (conv["id"], json.dumps(cart), total, "Pickup" if pickup else f"Delivery: {t[:200]}"))
-        state.clear()
-        return "order", T["order_done"][lang].format(id=oid, total=total, fulfil=FULFIL[fulfil][lang])
+    if flow == "checkout" and not (action and action != "pickup"):
+        return place_order(biz, conv, state, lang, t, has(t, ["pickup", "pick up", "takeaway", "पिकअप", "நேரில்"]))
     if flow == "lead":
         em, ph = EMAIL.search(t), PHONE.search(t)
         if em or ph:
             contact = em.group() if em else ph.group()
             lname = re.split(r"[,\n]", t.replace(contact, ""))[0].strip(" -:") or first
-            db.x("INSERT INTO leads(conversation_id,name,contact,interest) VALUES(?,?,?,?)",
-                 (conv["id"], lname, contact, state.get("interest", "")))
+            db.x("INSERT INTO leads(business_id,conversation_id,name,contact,interest) VALUES(?,?,?,?,?)",
+                 (bid, conv["id"], lname, contact, state.get("interest", "")))
             state.clear()
             return "lead", T["lead_done"][lang].format(name=lname.split()[0] if lname else "", contact=contact)
         return "lead", T["lead_retry"][lang]
@@ -364,34 +441,35 @@ def route(conv, state, text, lang, first, action=None):
     if has(t, KW["confirm"]) and state.get("cart"):
         state["flow"] = "checkout"
         return "order", T["ask_address"][lang], buttons(lang, "pickup", "cancel")
-    items = parse_items(t) if not action else []
-    if items:
+    items = parse_items(t, bid) if not action else []
+    if items and not biz.get("orders_enabled") and not has(t, KW["menu"]) and not faq_match(t, bid):
+        return start_booking(biz, state, lang, service=items[0][0]["name"])
+    if items and biz.get("orders_enabled"):
         return "order", cart_view(add_to_cart(state, items), lang), buttons(lang, "confirm", "more", "cancel")
     if has(t, KW["cart"] + KW["confirm"]):
         cart = state.get("cart", [])
         return "order", cart_view(cart, lang), buttons(lang, "confirm", "more", "cancel") if cart else buttons(lang, "menu")
-    if has(t, KW["menu"]):
-        ms = menu_items()
+    if has(t, KW["menu"] + ["services", "service", "price list", "सेवा", "சேவை"]):
+        ms = menu_items(bid)
         items = "\n".join(f"• {m['name']} — ₹{m['price']}" for m in ms)
         cats = list(dict.fromkeys(m["category"] for m in ms))
         rows = [{"id": f"cat:{c}", "title": c[:24], "description": f"{sum(m['category'] == c for m in ms)} items"} for c in cats]
-        return "menu", T["menu"][lang].format(items=items), list_ui(B["view_menu"][lang], "Categories", rows)
+        body = T["menu" if biz.get("orders_enabled") else "services"][lang].format(items=items)
+        return "menu", body, list_ui(B["view_menu"][lang], "Categories", rows)
     if has(t, KW["book"]):
-        slots = available_slots()
-        if not slots:
-            return "booking", T["no_slots"][lang]
-        state.update(flow="booking_slot", slot_options=[s["id"] for s in slots])
-        rows = [{"id": f"slot:{s['id']}", "title": fmt_slot(s)[:24], "description": f"{s['capacity'] - s['booked']} left"} for s in slots]
-        return ("booking", T["slots"][lang].format(slots="\n".join(f"*{i+1}.* {fmt_slot(s)}" for i, s in enumerate(slots))),
-                list_ui(B["view_slots"][lang], "Available", rows))
-    f = faq_match(t)
+        return start_booking(biz, state, lang)
+    f = faq_match(t, bid)
     if f:
-        ans = f[f"answer_{lang}"]
-        return "faq", ans
+        return "faq", f[f"answer_{lang}"] or f["answer_en"]
+    hours = biz.get("hours") or {}
+    if has(t, HOURS_KW) and (hours.get(lang) or hours.get("en")):
+        return "faq", T["hours"][lang].format(hours=hours.get(lang) or hours.get("en"))
     if has(t, KW["greet"]):
-        return "greeting", T["greet"][lang].format(name=first.split()[0] if first else ""), buttons(lang, "menu", "book", "human")
+        l1, l2 = LINES["restaurant" if restaurant else "other"]
+        return ("greeting", T["greet"][lang].format(name=first.split()[0] if first else "", biz=biz["name"], l1=l1[lang], l2=l2[lang]),
+                buttons(lang, "menu", "book", "human"))
     if llm.enabled() and t:
-        out = llm.grounded_answer("Spice Route Kitchen, a Chennai restaurant", business_facts(), t, lang)
+        out = llm.grounded_answer(biz["name"], business_facts(biz), t, lang)
         if out == llm.UNKNOWN:
             return "llm_unknown", T["unknown"][lang], buttons(lang, "human", "menu")
         if out:
