@@ -69,6 +69,44 @@ T = {
                  "hi": "माफ़ कीजिए, समझ नहीं पाया। *MENU*, *BOOK* लिखें, समय/डिलीवरी पूछें, या टीम के लिए *HUMAN*।",
                  "ta": "மன்னிக்கவும், புரியவில்லை. *MENU*, *BOOK*, நேரம்/டெலிவரி பற்றி கேளுங்கள், அல்லது *HUMAN*."},
 }
+T.update({
+    "unknown": {"en": "I'm not sure about that, and I'd rather not guess. 🙏 Reply *HUMAN* and our team will answer you here.",
+                "hi": "मुझे इसकी पक्की जानकारी नहीं है, और मैं अंदाज़ा नहीं लगाना चाहता। 🙏 *HUMAN* लिखें, हमारी टीम यहीं जवाब देगी।",
+                "ta": "இதைப் பற்றி எனக்கு உறுதியாகத் தெரியவில்லை, ஊகிக்க விரும்பவில்லை. 🙏 *HUMAN* அனுப்புங்கள், எங்கள் குழு பதிலளிக்கும்."},
+    "cat_items": {"en": "*{cat}*\n{items}\n\nTap an item to add it, or type e.g. “2 {example}”.",
+                  "hi": "*{cat}*\n{items}\n\nजोड़ने के लिए आइटम चुनें, या लिखें जैसे “2 {example}”।",
+                  "ta": "*{cat}*\n{items}\n\nசேர்க்க ஒன்றைத் தேர்ந்தெடுங்கள், அல்லது “2 {example}” என்று அனுப்புங்கள்."},
+    "voice_off": {"en": "🎤 Got your voice note! Voice replies aren't switched on yet. Could you type your message?",
+                  "hi": "🎤 आपका वॉइस नोट मिला! अभी वॉइस सुविधा चालू नहीं है, कृपया संदेश टाइप करें।",
+                  "ta": "🎤 உங்கள் குரல் செய்தி கிடைத்தது! குரல் வசதி இன்னும் இயக்கப்படவில்லை, தயவுசெய்து டைப் செய்யுங்கள்."},
+    "image_seen": {"en": "📷 From your photo I found:", "hi": "📷 आपकी फ़ोटो में मुझे मिला:", "ta": "📷 உங்கள் புகைப்படத்தில் கண்டது:"},
+    "image_handoff": {"en": "📷 Thanks for the photo! A team member will check it and reply here shortly.",
+                      "hi": "📷 फ़ोटो के लिए धन्यवाद! हमारी टीम इसे देखकर जल्द यहीं जवाब देगी।",
+                      "ta": "📷 புகைப்படத்திற்கு நன்றி! எங்கள் குழு பார்த்து விரைவில் இங்கே பதிலளிக்கும்."},
+})
+# Button / list labels (WhatsApp limits: button title 20 chars, list row title 24, list button 20)
+B = {
+    "menu": {"en": "🍛 Menu", "hi": "🍛 मेनू", "ta": "🍛 மெனு"},
+    "book": {"en": "📅 Book", "hi": "📅 बुक करें", "ta": "📅 முன்பதிவு"},
+    "human": {"en": "🙋 Talk to us", "hi": "🙋 टीम से बात", "ta": "🙋 குழுவுடன் பேச"},
+    "confirm": {"en": "✅ Confirm", "hi": "✅ कन्फर्म", "ta": "✅ உறுதி"},
+    "more": {"en": "➕ Add more", "hi": "➕ और जोड़ें", "ta": "➕ மேலும்"},
+    "cancel": {"en": "✖ Cancel", "hi": "✖ रद्द करें", "ta": "✖ ரத்து"},
+    "pickup": {"en": "🏃 Pickup", "hi": "🏃 पिकअप", "ta": "🏃 நேரில் பெற"},
+    "view_menu": {"en": "View menu", "hi": "मेनू देखें", "ta": "மெனு பார்க்க"},
+    "view_items": {"en": "Choose item", "hi": "आइटम चुनें", "ta": "தேர்வு செய்க"},
+    "view_slots": {"en": "Pick a slot", "hi": "स्लॉट चुनें", "ta": "நேரம் தேர்வு"},
+}
+
+
+def buttons(lang, *keys):
+    return {"kind": "buttons", "buttons": [{"id": k, "title": B[k][lang]} for k in keys]}
+
+
+def list_ui(label, section, rows):
+    return {"kind": "list", "button": label[:20], "sections": [{"title": section[:24], "rows": rows[:10]}]}
+
+
 FULFIL = {"pickup": {"en": "pickup", "hi": "पिकअप", "ta": "நேரில் பெறுதல்"}, "delivery": {"en": "delivery", "hi": "डिलीवरी", "ta": "டெலிவரி"}}
 
 KW = {
@@ -161,39 +199,122 @@ def log(conv_id, direction, sender, text, intent=None, lang=None):
     db.x("UPDATE conversations SET updated_at=CURRENT_TIMESTAMP WHERE id=?", (conv_id,))
 
 
-def handle_message(phone: str, name: str | None, text: str) -> dict:
-    """Process one inbound message. Returns {'reply': str|None, 'intent': str, 'lang': str}."""
+def handle_message(phone: str, name: str | None, text: str, action: str | None = None, lang_hint: str | None = None,
+                   log_text: str | None = None) -> dict:
+    """Process one inbound message.
+
+    action: id of a tapped reply button / list row (e.g. 'slot:12'); lang_hint: language reported by speech-to-text.
+    Returns {'reply': str|None, 'intent': str, 'lang': str, 'interactive': dict|None}.
+    """
     conv = get_conv(phone, name)
+    text = text or ""
     lang = detect_lang(text)
-    # keep previous language for short/neutral messages like "2" or "confirm"
-    if lang == "en" and not re.search(r"[a-zA-Z]{4,}", text):
+    if lang_hint in LANGS and lang == "en":
+        lang = lang_hint
+    # keep previous language for taps and short/neutral messages like "2" or "confirm"
+    elif action or (lang == "en" and not re.search(r"[a-zA-Z]{4,}", text)):
         lang = conv["lang"] or "en"
     state = db.jload(conv["state"], {}) or {}
     first = name or conv["name"] or ""
     db.x("UPDATE conversations SET lang=?, name=COALESCE(?, name) WHERE id=?", (lang, name, conv["id"]))
 
+    shown = log_text or text
     if conv["needs_human"]:
-        log(conv["id"], "in", "customer", text, "handoff_pending", lang)
-        return {"reply": None, "intent": "handoff_pending", "lang": lang}
+        log(conv["id"], "in", "customer", shown, "handoff_pending", lang)
+        return {"reply": None, "intent": "handoff_pending", "lang": lang, "interactive": None}
 
-    intent, reply = route(conv, state, text, lang, first)
+    out = route(conv, state, text, lang, first, action)
+    intent, reply, ui = (out + (None,))[:3]
     db.x("UPDATE conversations SET state=? WHERE id=?", (json.dumps(state, ensure_ascii=False), conv["id"]))
-    log(conv["id"], "in", "customer", text, intent, lang)
+    log(conv["id"], "in", "customer", shown, intent, lang)
     log(conv["id"], "out", "bot", reply, intent, lang)
-    return {"reply": reply, "intent": intent, "lang": lang}
+    return {"reply": reply, "intent": intent, "lang": lang, "interactive": ui}
 
 
-def route(conv, state, text, lang, first):
+def handoff(conv_id, reason):
+    db.x("UPDATE conversations SET needs_human=1, handoff_reason=? WHERE id=?", (reason[:200], conv_id))
+
+
+def handle_image(phone: str, name: str | None, caption: str, found: dict | None) -> dict:
+    """A customer photo. found = vision result {'kind': 'prescription'|'product'|..., 'items': [{'name','qty'}], 'summary'}.
+
+    Matched menu items go into the cart; prescriptions, unreadable photos and anything we can't match go to a human."""
+    conv = get_conv(phone, name)
+    lang = detect_lang(caption) if caption.strip() else (conv["lang"] or "en")
+    state = db.jload(conv["state"], {}) or {}
+    found = found or {}
+    summary = (found.get("summary") or caption or "photo").strip()
+    log_text = f"📷 Photo{': ' + caption if caption else ''}"
+    if conv["needs_human"]:
+        log(conv["id"], "in", "customer", log_text, "handoff_pending", lang)
+        return {"reply": None, "intent": "handoff_pending", "lang": lang, "interactive": None}
+    wanted = " and ".join(f"{int(i.get('qty') or 1)} {i.get('name', '')}" for i in found.get("items", []) if i.get("name"))
+    matched = parse_items(wanted) if wanted else []
+    if found.get("kind") == "prescription" or not matched:
+        handoff(conv["id"], f"Photo ({found.get('kind') or 'unrecognised'}): {summary}")
+        reply, intent, ui = T["image_handoff"][lang], "handoff", None
+    else:
+        cart = add_to_cart(state, matched)
+        reply = T["image_seen"][lang] + "\n" + cart_view(cart, lang)
+        intent, ui = "order", buttons(lang, "confirm", "more", "cancel")
+    db.x("UPDATE conversations SET state=? WHERE id=?", (json.dumps(state, ensure_ascii=False), conv["id"]))
+    log(conv["id"], "in", "customer", log_text, intent, lang)
+    log(conv["id"], "out", "bot", reply, intent, lang)
+    return {"reply": reply, "intent": intent, "lang": lang, "interactive": ui}
+
+
+def add_to_cart(state, items):
+    cart = state.setdefault("cart", [])
+    for m, qty in items:
+        for c in cart:
+            if c["id"] == m["id"]:
+                c["qty"] += qty
+                break
+        else:
+            cart.append({"id": m["id"], "name": m["name"], "price": m["price"], "qty": qty})
+    return cart
+
+
+def business_facts() -> str:
+    """Everything the LLM is allowed to know: FAQ answers, menu with prices, open slots."""
+    faq = "\n".join(f"- {x['topic']}: {x['answer_en']}" for x in db.q("SELECT * FROM faq"))
+    menu = "\n".join(f"- {m['name']} ({m['category']}): ₹{m['price']}" for m in menu_items())
+    return f"About us / FAQ:\n{faq}\n\nMenu (only these items exist):\n{menu}"
+
+
+ACTION_TEXT = {"menu": "menu", "book": "book", "human": "human", "confirm": "confirm", "cancel": "cancel", "pickup": "pickup", "more": "menu"}
+
+
+def route(conv, state, text, lang, first, action=None):
     flow = state.get("flow")
     t = text.strip()
+    if action:
+        if action.startswith("cat:"):
+            cat = action[4:]
+            items = [m for m in menu_items() if m["category"] == cat]
+            if items:
+                body = T["cat_items"][lang].format(cat=cat, example=items[0]["name"].lower(),
+                                                   items="\n".join(f"• {m['name']} — ₹{m['price']}" for m in items))
+                rows = [{"id": f"item:{m['id']}", "title": m["name"][:24], "description": f"₹{m['price']}"} for m in items]
+                return "menu", body, list_ui(B["view_items"][lang], cat, rows)
+        if action.startswith("item:"):
+            m = next((m for m in menu_items() if str(m["id"]) == action[5:]), None)
+            if m:
+                state.pop("flow", None) if flow != "checkout" else None
+                return "order", cart_view(add_to_cart(state, [(m, 1)]), lang), buttons(lang, "confirm", "more", "cancel")
+        if action.startswith("slot:") and flow == "booking_slot" and action[5:].isdigit() and int(action[5:]) in state.get("slot_options", []):
+            state["slot_id"] = int(action[5:])
+            state["flow"] = "booking_party"
+            return "booking", T["ask_party"][lang]
+        t = ACTION_TEXT.get(action, t)
 
     if has(t, KW["handoff"]):
         state.clear()
-        db.x("UPDATE conversations SET needs_human=1, handoff_reason=? WHERE id=?", (t[:200], conv["id"]))
+        handoff(conv["id"], t)
         return "handoff", T["handoff"][lang]
     if has(t, KW["cancel"]):
         state.clear()
-        return "cancel", T["cancelled"][lang]
+        return "cancel", T["cancelled"][lang], buttons(lang, "menu", "book", "human")
 
     # --- active flows ---
     if flow == "booking_slot":
@@ -216,7 +337,7 @@ def route(conv, state, text, lang, first):
             state.clear()
             return "booking", T["booked"][lang].format(n=n, when=fmt_slot(slot), code=code)
         return "booking", T["ask_party"][lang]
-    if flow == "checkout":
+    if flow == "checkout" and not (action and action not in ("pickup",)):
         cart = state.get("cart", [])
         pickup = has(t, ["pickup", "pick up", "takeaway", "पिकअप", "நேரில்"])
         fulfil = "pickup" if pickup else "delivery"
@@ -242,40 +363,37 @@ def route(conv, state, text, lang, first):
         return "lead", T["ask_lead"][lang]
     if has(t, KW["confirm"]) and state.get("cart"):
         state["flow"] = "checkout"
-        return "order", T["ask_address"][lang]
-    items = parse_items(t)
+        return "order", T["ask_address"][lang], buttons(lang, "pickup", "cancel")
+    items = parse_items(t) if not action else []
     if items:
-        cart = state.setdefault("cart", [])
-        for m, qty in items:
-            for c in cart:
-                if c["id"] == m["id"]:
-                    c["qty"] += qty
-                    break
-            else:
-                cart.append({"id": m["id"], "name": m["name"], "price": m["price"], "qty": qty})
-        return "order", cart_view(cart, lang)
+        return "order", cart_view(add_to_cart(state, items), lang), buttons(lang, "confirm", "more", "cancel")
     if has(t, KW["cart"] + KW["confirm"]):
-        return "order", cart_view(state.get("cart", []), lang)
+        cart = state.get("cart", [])
+        return "order", cart_view(cart, lang), buttons(lang, "confirm", "more", "cancel") if cart else buttons(lang, "menu")
     if has(t, KW["menu"]):
-        items = "\n".join(f"• {m['name']} — ₹{m['price']}" for m in menu_items())
-        return "menu", T["menu"][lang].format(items=items)
+        ms = menu_items()
+        items = "\n".join(f"• {m['name']} — ₹{m['price']}" for m in ms)
+        cats = list(dict.fromkeys(m["category"] for m in ms))
+        rows = [{"id": f"cat:{c}", "title": c[:24], "description": f"{sum(m['category'] == c for m in ms)} items"} for c in cats]
+        return "menu", T["menu"][lang].format(items=items), list_ui(B["view_menu"][lang], "Categories", rows)
     if has(t, KW["book"]):
         slots = available_slots()
         if not slots:
             return "booking", T["no_slots"][lang]
         state.update(flow="booking_slot", slot_options=[s["id"] for s in slots])
-        return "booking", T["slots"][lang].format(slots="\n".join(f"*{i+1}.* {fmt_slot(s)}" for i, s in enumerate(slots)))
+        rows = [{"id": f"slot:{s['id']}", "title": fmt_slot(s)[:24], "description": f"{s['capacity'] - s['booked']} left"} for s in slots]
+        return ("booking", T["slots"][lang].format(slots="\n".join(f"*{i+1}.* {fmt_slot(s)}" for i, s in enumerate(slots))),
+                list_ui(B["view_slots"][lang], "Available", rows))
     f = faq_match(t)
     if f:
         ans = f[f"answer_{lang}"]
         return "faq", ans
     if has(t, KW["greet"]):
-        return "greeting", T["greet"][lang].format(name=first.split()[0] if first else "")
-    if llm.enabled():
-        kb = "\n".join(f"- {x['topic']}: {x['answer_en']}" for x in db.q("SELECT * FROM faq"))
-        out = llm.chat(f"You are the friendly WhatsApp assistant for Spice Route Kitchen, a Chennai restaurant. "
-                       f"Answer briefly using only this knowledge base; if unsure suggest replying HUMAN. "
-                       f"Reply in language code '{lang}'.\n{kb}", t)
+        return "greeting", T["greet"][lang].format(name=first.split()[0] if first else ""), buttons(lang, "menu", "book", "human")
+    if llm.enabled() and t:
+        out = llm.grounded_answer("Spice Route Kitchen, a Chennai restaurant", business_facts(), t, lang)
+        if out == llm.UNKNOWN:
+            return "llm_unknown", T["unknown"][lang], buttons(lang, "human", "menu")
         if out:
             return "llm", out
-    return "fallback", T["fallback"][lang]
+    return "fallback", T["fallback"][lang], buttons(lang, "menu", "book", "human")

@@ -11,12 +11,12 @@ if _env.exists():
             _k, _v = _line.split("=", 1)
             os.environ.setdefault(_k.strip(), _v.strip().strip('"').strip("'"))
 import time
-from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from . import auth, db, engine, llm, seed, whatsapp
+from . import auth, db, engine, llm, media, seed, whatsapp
 from .logs import log_event, mask_phone, setup as setup_logging
 
 setup_logging()
@@ -57,7 +57,9 @@ async def guard(request: Request, call_next):
 class SimIn(BaseModel):
     phone: str
     name: str | None = None
-    text: str
+    text: str = ""
+    type: str = "text"            # text | audio | image  (audio/image are mocked: text is the transcript / photo contents)
+    action: str | None = None     # id of a tapped button or list row
 
 
 class ReplyIn(BaseModel):
@@ -104,7 +106,8 @@ def me(request: Request):
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "llm": "live" if llm.enabled() else "mock", "whatsapp": "live" if whatsapp.live() else "simulated",
+    return {"ok": True, "llm": "live" if llm.enabled() else "mock",
+            "voice": "live" if llm.stt_enabled() else "mock", "whatsapp": "live" if whatsapp.live() else "simulated",
             "business": seed.BUSINESS, "auth": "demo" if auth.demo_mode() else "configured"}
 
 
@@ -118,7 +121,7 @@ def verify(mode: str = Query(None, alias="hub.mode"), token: str = Query(None, a
 
 
 @app.post("/webhook")
-async def inbound(req: Request):
+async def inbound(req: Request, background: BackgroundTasks):
     raw = await req.body()
     if not whatsapp.verify_signature(raw, req.headers.get("x-hub-signature-256")):
         log_event("webhook_signature_invalid", "warning")
@@ -129,21 +132,34 @@ async def inbound(req: Request):
         raise HTTPException(400, "invalid JSON")
     statuses = whatsapp.record_statuses(payload)
     results, duplicates = [], 0
+    queued = 0
     for m in whatsapp.parse_inbound(payload):
         if not whatsapp.claim_message(m["wa_id"]):
             duplicates += 1
             log_event("webhook_duplicate_skipped", wa_id=m["wa_id"])
             continue
         log_event("webhook_message", wa_id=m["wa_id"], type=m["type"], frm=mask_phone(m["phone"]))
-        try:
-            r = engine.handle_message(m["phone"], m["name"], m["text"])
-        except Exception:
-            log_event("engine_error", "error", wa_id=m["wa_id"], exc_info=True)
-            continue  # still return 200 so Meta doesn't retry a message that crashes us
-        if r["reply"]:
-            r["delivery"] = whatsapp.send_text(m["phone"], r["reply"])
-        results.append(r)
-    return {"processed": len(results), "duplicates": duplicates, "statuses": statuses, "results": results}
+        if m["type"] in ("audio", "image") and whatsapp.live():
+            # downloading + transcribing/vision can take seconds; answer Meta now, reply when done
+            background.add_task(process_inbound, m)
+            queued += 1
+            continue
+        r = process_inbound(m)
+        if r:
+            results.append(r)
+    return {"processed": len(results), "queued": queued, "duplicates": duplicates, "statuses": statuses, "results": results}
+
+
+def process_inbound(m: dict) -> dict | None:
+    try:
+        r = media.handle(m) if m["type"] in ("audio", "image") else \
+            engine.handle_message(m["phone"], m["name"], m["text"], action=m.get("action"))
+    except Exception:
+        log_event("engine_error", "error", wa_id=m["wa_id"], exc_info=True)
+        return None  # still return 200 so Meta doesn't retry a message that crashes us
+    if r["reply"]:
+        r["delivery"] = whatsapp.send_reply(m["phone"], r["reply"], r.get("interactive"))
+    return r
 
 
 @app.get("/api/outbox")
@@ -154,7 +170,9 @@ def outbox(limit: int = 100):
 # ---------- simulator ----------
 @app.post("/api/simulate")
 def simulate(m: SimIn):
-    return engine.handle_message(m.phone, m.name, m.text)
+    if m.type in ("audio", "image"):
+        return media.handle({"phone": m.phone, "name": m.name, "type": m.type, "text": m.text, "mock": True})
+    return engine.handle_message(m.phone, m.name, m.text, action=m.action)
 
 
 @app.post("/api/reset")

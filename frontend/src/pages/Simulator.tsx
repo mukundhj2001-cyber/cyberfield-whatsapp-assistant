@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { post } from "../api";
 
-type Msg = { from: "me" | "bot"; text: string; meta?: string };
+type UI = { kind: "buttons"; buttons: { id: string; title: string }[] } | { kind: "list"; button: string; sections: { title: string; rows: { id: string; title: string; description?: string }[] }[] };
+type Msg = { from: "me" | "bot"; text: string; meta?: string; ui?: UI | null };
 const PERSONAS = [
   { phone: "+919876500001", name: "Ananya", lang: "English" },
   { phone: "+919876500002", name: "Vikram", lang: "हिन्दी" },
@@ -14,8 +15,25 @@ const QUICK: Record<string, string[]> = {
 };
 const LANG_NAME: Record<string, string> = { en: "English", hi: "Hindi", ta: "Tamil" };
 
+function Interactive({ ui, onPick }: { ui: UI; onPick: (id: string, title: string) => void }) {
+  const [open, setOpen] = useState(false);
+  if (ui.kind === "buttons") return (
+    <div className="mt-1 grid gap-1" data-testid="wa-buttons">{ui.buttons.map((b) => (
+      <button key={b.id} data-testid={`btn-${b.id}`} onClick={() => onPick(b.id, b.title)} className="rounded-lg bg-[#202c33] py-1.5 text-[13px] text-[#53bdeb] hover:bg-[#2a3942]">{b.title}</button>))}
+    </div>);
+  return (
+    <div className="mt-1" data-testid="wa-list">
+      <button onClick={() => setOpen(!open)} className="w-full rounded-lg bg-[#202c33] py-1.5 text-[13px] text-[#53bdeb] hover:bg-[#2a3942]">☰ {ui.button}</button>
+      {open && <div className="mt-1 rounded-lg bg-[#202c33] p-1">{ui.sections.map((s) => (
+        <div key={s.title}><div className="px-2 pt-1 text-[10px] uppercase text-emerald-400">{s.title}</div>
+          {s.rows.map((r) => (<button key={r.id} data-testid={`row-${r.id}`} onClick={() => { setOpen(false); onPick(r.id, r.title); }}
+            className="block w-full text-left px-2 py-1.5 rounded hover:bg-white/5"><div className="text-[13px] text-white">{r.title}</div>
+            {r.description && <div className="text-[11px] text-zinc-400">{r.description}</div>}</button>))}</div>))}</div>}
+    </div>);
+}
+
 function Bubble({ m }: { m: Msg }) {
-  const html = m.text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/\*(.+?)\*/g, "<b>$1</b>");
+  const html = m.text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/\*(.+?)\*/g, "<b>$1</b>").replace(/(^|\s)_(.+?)_/g, "$1<i>$2</i>");
   return (
     <div className={`flex ${m.from === "me" ? "justify-end" : "justify-start"}`}>
       <div className={`max-w-[82%] rounded-lg px-2.5 py-1.5 text-[13px] leading-snug shadow whitespace-pre-wrap ${m.from === "me" ? "bg-[#005c4b] text-white rounded-tr-none" : "bg-[#202c33] text-zinc-100 rounded-tl-none"}`}>
@@ -36,18 +54,20 @@ export default function Simulator() {
   const thread = msgs[persona.phone] ?? [];
   useEffect(() => { end.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, [thread.length]);
 
-  async function send(t: string) {
+  async function send(t: string, opts: { type?: "text" | "audio" | "image"; action?: string } = {}) {
     if (!t.trim()) return;
+    const type = opts.type ?? "text";
     const now = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     const add = (m: Msg) => setMsgs((s) => ({ ...s, [persona.phone]: [...(s[persona.phone] ?? []), m] }));
-    add({ from: "me", text: t, meta: now });
+    add({ from: "me", text: type === "audio" ? `🎤 Voice note\n_“${t}”_` : type === "image" ? `📷 Photo\n${t}` : t, meta: now });
     setText(""); setBusy(true);
     try {
-      const r = await post("/api/simulate", { phone: persona.phone, name: persona.name, text: t });
+      const r = await post("/api/simulate", { phone: persona.phone, name: persona.name, text: t, type, action: opts.action });
       setLast({ intent: r.intent, lang: r.lang });
-      add({ from: "bot", text: r.reply ?? "⏳ A team member has been notified and will reply here.", meta: now });
+      add({ from: "bot", text: r.reply ?? "⏳ A team member has been notified and will reply here.", meta: now, ui: r.interactive });
     } finally { setBusy(false); }
   }
+  const lastBot = [...thread].reverse().find((m) => m.from === "bot");
 
   return (
     <div className="grid lg:grid-cols-[1fr_380px_1fr] gap-8 items-start">
@@ -74,12 +94,15 @@ export default function Simulator() {
         </div>
         <div data-testid="chat" className="h-[470px] overflow-y-auto p-3 space-y-1.5 bg-[#0b141a] bg-[radial-gradient(rgba(255,255,255,.03)_1px,transparent_1px)] [background-size:14px_14px]">
           <div className="text-center"><span className="chip bg-[#182229] text-[#8696a0]">Messages are simulated · demo mode</span></div>
-          {thread.map((m, i) => <Bubble key={i} m={m} />)}
+          {thread.map((m, i) => <div key={i}><Bubble m={m} />
+            {m.ui && m === lastBot && <div className="max-w-[82%]"><Interactive ui={m.ui} onPick={(id, title) => send(title, { action: id })} /></div>}</div>)}
           <div ref={end} />
         </div>
         <form className="bg-[#202c33] p-2 flex gap-2" onSubmit={(e) => { e.preventDefault(); send(text); }}>
           <input data-testid="chat-input" value={text} onChange={(e) => setText(e.target.value)} placeholder="Type a message"
             className="flex-1 rounded-full bg-[#2a3942] px-4 py-2 text-sm text-white outline-none" />
+          <button type="button" data-testid="chat-voice" title="Send as a voice note (mock transcript)" disabled={busy || !text.trim()} onClick={() => send(text, { type: "audio" })} className="h-9 w-9 rounded-full text-zinc-300 hover:bg-white/10 disabled:opacity-40">🎤</button>
+          <button type="button" data-testid="chat-photo" title="Send as a photo (mock: describe what's in it)" disabled={busy || !text.trim()} onClick={() => send(text, { type: "image" })} className="h-9 w-9 rounded-full text-zinc-300 hover:bg-white/10 disabled:opacity-40">📷</button>
           <button data-testid="chat-send" disabled={busy} className="h-9 w-9 rounded-full bg-[#00a884] text-white grid place-items-center">➤</button>
         </form>
       </div>
@@ -103,6 +126,7 @@ export default function Simulator() {
           ) : <div className="text-sm text-zinc-500">Send a message to see detected intent and language.</div>}
         </div>
         <div className="card p-4 text-xs text-zinc-400 leading-relaxed">
+          <b className="text-gold-300">Voice & photos:</b> type a message and tap 🎤 to send it as a voice note (we mock the transcript), or 📷 to send a photo described by your text, e.g. “photo of 2 butter chicken” or “prescription: paracetamol 500mg”. Live, we transcribe with Whisper and read photos with a vision model.<br /><br />
           <b className="text-gold-300">Production-ready path:</b> the same engine sits behind a WhatsApp Cloud API webhook (<code className="text-gold-200">/webhook</code>). Outbound messages stay simulated until your Meta keys are configured, and every broadcast waits for owner approval.
         </div>
       </section>

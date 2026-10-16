@@ -83,6 +83,50 @@ def send_text(phone: str, text: str, creds=None) -> str:
     return send(phone, {"type": "text", "text": {"body": text[:4096], "preview_url": False}}, text, creds)
 
 
+def interactive_message(text: str, ui: dict) -> dict:
+    """Build a Cloud API interactive message (reply buttons or list) from the engine's neutral UI spec."""
+    body = {"text": text[:1024]}
+    if ui["kind"] == "buttons":
+        action = {"buttons": [{"type": "reply", "reply": {"id": b["id"][:256], "title": b["title"][:20]}} for b in ui["buttons"][:3]]}
+        return {"type": "interactive", "interactive": {"type": "button", "body": body, "action": action}}
+    sections = [{"title": sec["title"][:24], "rows": [{"id": r["id"][:200], "title": r["title"][:24],
+                                                        **({"description": r["description"][:72]} if r.get("description") else {})}
+                                                       for r in sec["rows"][:10]]} for sec in ui["sections"]]
+    return {"type": "interactive", "interactive": {"type": "list", "body": body, "action": {"button": ui["button"][:20], "sections": sections}}}
+
+
+def send_reply(phone: str, text: str, ui: dict | None = None, creds=None) -> str:
+    """Send the bot's reply, as buttons/list when the engine attached one. Long bodies go as text first."""
+    if not ui:
+        return send_text(phone, text, creds)
+    if len(text) > 1024:
+        send_text(phone, text, creds)
+        text = "👇"
+    return send(phone, interactive_message(text, ui), text, creds)
+
+
+def download_media(media_id: str, creds=None, max_bytes: int = 16 * 1024 * 1024) -> tuple[bytes, str] | None:
+    """Fetch an inbound voice note / image: GET /{media-id} for the URL, then GET the URL with the same token."""
+    if creds is None and live():
+        creds = (os.environ["WHATSAPP_PHONE_NUMBER_ID"], os.environ["WHATSAPP_TOKEN"])
+    if not creds or not creds[1] or not media_id:
+        return None
+    h = {"Authorization": f"Bearer {creds[1]}"}
+    try:
+        meta = httpx.get(graph_url(media_id), headers=h, timeout=15)
+        meta.raise_for_status()
+        info = meta.json()
+        if int(info.get("file_size") or 0) > max_bytes:
+            log_event("media_too_large", "warning", media_id=media_id, size=info.get("file_size"))
+            return None
+        r = httpx.get(info["url"], headers=h, timeout=30, follow_redirects=True)
+        r.raise_for_status()
+        return r.content[:max_bytes], info.get("mime_type") or r.headers.get("content-type", "")
+    except Exception as e:
+        log_event("media_download_failed", "warning", media_id=media_id, error=type(e).__name__)
+        return None
+
+
 # ---------- inbound ----------
 def claim_message(wa_id: str | None) -> bool:
     """Idempotency: True the first time we see a WhatsApp message id, False on Meta's retries/duplicates."""
@@ -125,5 +169,8 @@ def parse_inbound(payload: dict):
                     yield {**base, "text": rep.get("title", ""), "action": rep.get("id")}
                 elif m.get("type") == "button":  # quick-reply button on a template
                     yield {**base, "text": m["button"].get("text", ""), "action": m["button"].get("payload")}
+                elif m.get("type") in ("audio", "image"):
+                    media = m[m["type"]]
+                    yield {**base, "text": media.get("caption", ""), "media_id": media.get("id"), "mime": media.get("mime_type", "")}
                 else:
                     yield base
