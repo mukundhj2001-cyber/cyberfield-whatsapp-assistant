@@ -10,12 +10,16 @@ if _env.exists():
         if _line and not _line.startswith("#") and "=" in _line:
             _k, _v = _line.split("=", 1)
             os.environ.setdefault(_k.strip(), _v.strip().strip('"').strip("'"))
-from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, PlainTextResponse
+import time
+from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from . import db, engine, llm, seed, whatsapp
+from . import auth, db, engine, llm, seed, whatsapp
+from .logs import log_event, mask_phone, setup as setup_logging
+
+setup_logging()
 
 from contextlib import asynccontextmanager
 
@@ -23,11 +27,31 @@ from contextlib import asynccontextmanager
 @asynccontextmanager
 async def lifespan(_app):
     seed.seed()
+    log_event("startup", whatsapp="live" if whatsapp.live() else "simulated", llm="live" if llm.enabled() else "mock",
+              auth="demo" if auth.demo_mode() else "configured", signature_check=bool(os.environ.get("WHATSAPP_APP_SECRET")))
+    auth._credentials()  # logs the demo-login warning at startup if needed
     yield
 
 
 app = FastAPI(title="Cyberfield WhatsApp Assistant", version="1.0.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+# API routes anyone may call. Everything else under /api needs a dashboard session.
+PUBLIC_API = {"/api/health", "/api/simulate", "/api/auth/login", "/api/auth/logout", "/api/auth/me"}
+PUBLIC_PREFIXES = ("/api/public/", "/api/payments/")
+
+
+@app.middleware("http")
+async def guard(request: Request, call_next):
+    t0 = time.perf_counter()
+    path = request.url.path
+    if path.startswith("/api/") and path not in PUBLIC_API and not path.startswith(PUBLIC_PREFIXES) and request.method != "OPTIONS":
+        if not auth.check(request.cookies.get(auth.COOKIE)):
+            return JSONResponse({"detail": "login required"}, status_code=401)
+    resp = await call_next(request)
+    if path.startswith(("/api/", "/webhook")):
+        log_event("http", method=request.method, path=path, status=resp.status_code, ms=round((time.perf_counter() - t0) * 1000, 1))
+    return resp
 
 
 class SimIn(BaseModel):
@@ -50,10 +74,38 @@ class StatusIn(BaseModel):
     status: str
 
 
+class LoginIn(BaseModel):
+    username: str
+    password: str
+
+
+# ---------- auth ----------
+@app.post("/api/auth/login")
+def login(body: LoginIn, response: Response, request: Request):
+    if not auth.verify(body.username, body.password):
+        log_event("login_failed", "warning", user=body.username[:40])
+        raise HTTPException(401, "invalid username or password")
+    secure = os.environ.get("COOKIE_SECURE", "").lower() in ("1", "true", "yes") or request.url.scheme == "https"
+    response.set_cookie(auth.COOKIE, auth.issue(body.username), max_age=auth.MAX_AGE, httponly=True, samesite="lax", secure=secure)
+    log_event("login_ok", user=body.username[:40])
+    return {"ok": True, "user": body.username, "demo_credentials": auth.demo_mode()}
+
+
+@app.post("/api/auth/logout")
+def logout(response: Response):
+    response.delete_cookie(auth.COOKIE)
+    return {"ok": True}
+
+
+@app.get("/api/auth/me")
+def me(request: Request):
+    return {"user": auth.check(request.cookies.get(auth.COOKIE)), "demo_credentials": auth.demo_mode()}
+
+
 @app.get("/api/health")
 def health():
     return {"ok": True, "llm": "live" if llm.enabled() else "mock", "whatsapp": "live" if whatsapp.live() else "simulated",
-            "business": seed.BUSINESS}
+            "business": seed.BUSINESS, "auth": "demo" if auth.demo_mode() else "configured"}
 
 
 # ---------- WhatsApp Cloud API webhook ----------
@@ -67,14 +119,36 @@ def verify(mode: str = Query(None, alias="hub.mode"), token: str = Query(None, a
 
 @app.post("/webhook")
 async def inbound(req: Request):
-    payload = await req.json()
-    results = []
-    for phone, name, text in whatsapp.parse_inbound(payload):
-        r = engine.handle_message(phone, name, text)
+    raw = await req.body()
+    if not whatsapp.verify_signature(raw, req.headers.get("x-hub-signature-256")):
+        log_event("webhook_signature_invalid", "warning")
+        raise HTTPException(401, "invalid signature")
+    try:
+        payload = json.loads(raw or b"{}")
+    except ValueError:
+        raise HTTPException(400, "invalid JSON")
+    statuses = whatsapp.record_statuses(payload)
+    results, duplicates = [], 0
+    for m in whatsapp.parse_inbound(payload):
+        if not whatsapp.claim_message(m["wa_id"]):
+            duplicates += 1
+            log_event("webhook_duplicate_skipped", wa_id=m["wa_id"])
+            continue
+        log_event("webhook_message", wa_id=m["wa_id"], type=m["type"], frm=mask_phone(m["phone"]))
+        try:
+            r = engine.handle_message(m["phone"], m["name"], m["text"])
+        except Exception:
+            log_event("engine_error", "error", wa_id=m["wa_id"], exc_info=True)
+            continue  # still return 200 so Meta doesn't retry a message that crashes us
         if r["reply"]:
-            r["delivery"] = whatsapp.send_text(phone, r["reply"])
+            r["delivery"] = whatsapp.send_text(m["phone"], r["reply"])
         results.append(r)
-    return {"processed": len(results), "results": results}
+    return {"processed": len(results), "duplicates": duplicates, "statuses": statuses, "results": results}
+
+
+@app.get("/api/outbox")
+def outbox(limit: int = 100):
+    return db.q("SELECT * FROM outbox ORDER BY id DESC LIMIT ?", (limit,))
 
 
 # ---------- simulator ----------

@@ -5,7 +5,9 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
 os.environ["DB_PATH"] = str(Path(tempfile.mkdtemp()) / "test.db")
-for k in ("LLM_API_KEY", "WHATSAPP_TOKEN", "WHATSAPP_PHONE_NUMBER_ID"):
+os.environ["WHATSAPP_RETRY_BASE_DELAY"] = "0"
+for k in ("LLM_API_KEY", "WHATSAPP_TOKEN", "WHATSAPP_PHONE_NUMBER_ID", "WHATSAPP_APP_SECRET", "ADMIN_USERNAME", "ADMIN_PASSWORD",
+          "STT_API_KEY", "RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET", "RAZORPAY_WEBHOOK_SECRET", "SESSION_SECRET"):
     os.environ.pop(k, None)
 
 
@@ -15,6 +17,15 @@ def client():
     from app import main, seed
     with TestClient(main.app) as c:
         seed.seed(force=True)
+        assert c.post("/api/auth/login", json={"username": "admin", "password": "cyberfield"}).status_code == 200
+        yield c
+
+
+@pytest.fixture()
+def anon():
+    from fastapi.testclient import TestClient
+    from app import main
+    with TestClient(main.app) as c:
         yield c
 
 

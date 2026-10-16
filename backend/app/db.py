@@ -21,7 +21,17 @@ CREATE TABLE IF NOT EXISTS faq(id INTEGER PRIMARY KEY, topic TEXT, keywords TEXT
 CREATE TABLE IF NOT EXISTS broadcasts(id INTEGER PRIMARY KEY, title TEXT, body TEXT, audience TEXT, status TEXT DEFAULT 'pending_approval',
   approved_by TEXT, recipients INTEGER DEFAULT 0, created_at TEXT DEFAULT CURRENT_TIMESTAMP, sent_at TEXT);
 CREATE TABLE IF NOT EXISTS outbox(id INTEGER PRIMARY KEY, phone TEXT, text TEXT, mode TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS processed_messages(wa_id TEXT PRIMARY KEY, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS message_status(id INTEGER PRIMARY KEY, wa_message_id TEXT, status TEXT, recipient TEXT, error TEXT,
+  ts TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX IF NOT EXISTS ix_status_wamid ON message_status(wa_message_id);
 """
+
+# Columns added after v1. Existing databases are upgraded in place on startup.
+COLUMNS = {
+    "outbox": {"wa_message_id": "TEXT", "status": "TEXT", "error": "TEXT", "attempts": "INTEGER DEFAULT 0"},
+}
 
 
 def db_path() -> str:
@@ -39,6 +49,16 @@ def connect() -> sqlite3.Connection:
 def init():
     with _lock, connect() as con:
         con.executescript(SCHEMA)
+        migrate(con)
+
+
+def migrate(con):
+    for table, cols in COLUMNS.items():
+        have = {r[1] for r in con.execute(f"PRAGMA table_info({table})")}
+        for name, decl in cols.items():
+            if name not in have:
+                con.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+    con.commit()
 
 
 def q(sql, args=(), one=False):
@@ -52,6 +72,14 @@ def x(sql, args=()) -> int:
         cur = con.execute(sql, args)
         con.commit()
         return cur.lastrowid
+
+
+def xc(sql, args=()) -> int:
+    """Execute and return the number of affected rows."""
+    with _lock, connect() as con:
+        cur = con.execute(sql, args)
+        con.commit()
+        return cur.rowcount
 
 
 def jload(s, default=None):

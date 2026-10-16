@@ -1,6 +1,4 @@
-fastapi>=0.110
-uvicorn[standard]>=0.27
-httpx>=0.27
-pydantic>=2
+-r requirements-prod.txt
+# test / dev only
 pytest>=8
 playwright>=1.44

@@ -29,7 +29,10 @@ try:
         pg.get_by_test_id("persona-Lakshmi").click()
         for t in ["வணக்கம்", "டெலிவரி இருக்கா?"]: say(t)
         pg.wait_for_timeout(600); pg.screenshot(path=OUT / "03-chat-faq-tamil.png")
-        pg.get_by_test_id("tab-dash").click(); pg.wait_for_timeout(800)
+        pg.get_by_test_id("tab-dash").click(); pg.wait_for_timeout(400)
+        pg.screenshot(path=OUT / "00-login.png")
+        pg.get_by_test_id("login-user").fill("admin"); pg.get_by_test_id("login-pass").fill("cyberfield")
+        pg.get_by_test_id("login-submit").click(); pg.wait_for_timeout(800)
         pg.locator("tbody tr").first.click(); pg.wait_for_timeout(600)
         pg.screenshot(path=OUT / "04-dashboard-conversations.png", full_page=True)
         for i, tab in enumerate(["Orders", "Bookings", "Leads", "Handoff queue", "Broadcasts"], 5):
